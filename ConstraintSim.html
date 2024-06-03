@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 80vh;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 1px solid black;
+        }
+        #ballSlider {
+            width: 8%;
+        }
+        #restitutionSlider {
+            width: 8%;
+        }
+        #restitutionValue {
+            display: inline-block;
+            width: 200px;
+        }
+        #frictionSlider {
+            width: 8%;
+        }
+        #frictionValue {
+            display: inline-block;
+            width: 200px;
+        }
+        #numBallValue {
+            display: inline-block;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container">
+    <canvas id="myCanvas"></canvas>
+</div>
+
+<span id="numBallValue">Number of Balls: 1</span>
+<input type="range" id="ballSlider" min="1" max="3" value="1"> <br>
+
+<span id="restitutionValue">Coefficient of Restitution: 1</span>
+<input type="range" id="restitutionSlider" min="0" max="1" value="1" step="0.01"> <br>
+
+<span id="frictionValue">Coefficient of Friction: 0</span>
+<input type="range" id="frictionSlider" min="0" max="1" value="0" step="0.01"> <br>
+
+</body>
+<script>
+
+    class Vector {
+        constructor(x = 0.0, y = 0.0) {
+            this.x = x;
+            this.y = y;
+        }
+
+        set(v) {
+            this.x = v.x;
+            this.y = v.y;
+        }
+
+        scale(s) {
+            this.x = this.x * s;
+            this.y = this.y * s;
+        }
+
+        add(v, s = 1.0) {
+            this.x += v.x * s;
+            this.y += v.y * s;
+            return this;
+        }
+
+        addVectors(a, b) {
+            this.x = a.x + b.x;
+            this.y = a.y + b.y;
+            return this;
+        }
+
+        subtract(v, s = 1.0) {
+            this.x -= v.x * s;
+            this.y -= v.y * s;
+            return this;
+        }
+
+        subtractVectors(a, b) {
+            this.x = a.x - b.x;
+            this.y = a.y - b.y;
+            return this;
+        }
+
+        clone() {
+            return new Vector(this.x, this.y);
+        }
+
+        length() {
+            return Math.sqrt(this.x * this.x + this.y * this.y);
+        }
+
+        dot(v) {
+            return this.x * v.x + this.y * v.y;
+        }
+    }
+    class Ball {
+        constructor(radius, position, velocity, mass, color) {
+            this.color = color;
+            this.mass = mass;
+            this.radius = radius;
+            this.position = position.clone();
+            this.velocity = velocity.clone();
+        }
+
+    }
+
+    let canvas, ctx;
+    let width, height;
+    let balls = [];
+    let numBalls;
+    let gravity;
+    let steps;
+    let restitution;
+    let friction;
+    let minRadius;
+    let maxRadius;
+    let minXvel;
+    let maxXvel;
+    let constraintRadius;
+    let constraintCenter;
+
+    function setup() {
+        canvas = document.getElementById('myCanvas');
+        ctx = canvas.getContext('2d');
+
+        resizeCanvas();
+        steps = 1000;
+        numBalls = 1;
+        gravity = new Vector(0, 0.5);
+        restitution = 1;
+        friction = 0;
+        minRadius = 20;
+        maxRadius = 40;
+        minXvel = -5;
+        maxXvel = 5;
+        constraintRadius = 250
+        constraintCenter = new Vector(500, 400);
+
+        for (let i = 0; i < numBalls; i++) {
+            let radius = Math.random() * (maxRadius - minRadius) + minRadius;
+            let position = new Vector(Math.random() * width, Math.random() * (height - 200));
+            let velocity = new Vector(Math.random() * (maxXvel - minXvel) + minXvel, 0);
+            let color = [Math.random() * 255, Math.random() * 255, Math.random() * 255];
+            let mass = Math.PI * radius * radius;
+            let ball = new Ball(radius, position, velocity, mass, color)
+            balls.push(ball)
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+    }
+
+    function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight * 0.8;
+        canvas.width = width;
+        canvas.height = height;
+    }
+
+    let numBallSliderValue = document.getElementById('numBallValue');
+    document.getElementById('ballSlider').addEventListener('input', function() {
+        let newNumBalls = parseInt(this.value);
+        numBallSliderValue.textContent = "Number of Balls: " + newNumBalls;
+        updateBalls(newNumBalls);
+    });
+
+    let restitutionSliderValue = document.getElementById('restitutionValue');
+    document.getElementById('restitutionSlider').addEventListener('input', function() {
+        restitution = this.value;
+        restitutionSliderValue.textContent = "Coefficient of Restitution: " + restitution;
+    });
+
+    let frictionSliderValue = document.getElementById('frictionValue');
+    document.getElementById('frictionSlider').addEventListener('input', function() {
+        friction = this.value;
+        frictionSliderValue.textContent = "Coefficient of Friction: " + friction;
+    });
+
+    let isDragging = false;
+    let draggedBall = null;
+    let dx = 0;
+    let dy = 0;
+    let prevMouseX, prevMouseY;
+
+    function handleMouseDown(event) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        for (let i = 0; i < numBalls; i++) {
+            const ball = balls[i];
+            const dx = mouseX - ball.position.x;
+            const dy = mouseY - ball.position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < ball.radius) {
+                isDragging = true;
+                draggedBall = ball;
+                draggedBall.velocity.x = 0;
+                draggedBall.velocity.y = 0;
+                break;
+            }
+        }
+    }
+
+    function handleMouseMove(event) {
+        if (!isDragging) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        draggedBall.position.x = mouseX;
+        draggedBall.position.y = mouseY;
+
+        dx = mouseX - prevMouseX;
+        dy = mouseY - prevMouseY;
+
+        prevMouseX = mouseX;
+        prevMouseY = mouseY;
+    }
+
+    function handleMouseUp(event) {
+        if (!isDragging) return;
+        draggedBall.velocity.x = (dx / 4);
+        draggedBall.velocity.y = (dy / 4);
+        isDragging = false;
+        draggedBall = null;
+    }
+
+    function updateBalls(newNumBalls) {
+        if (numBalls < newNumBalls) {
+            let ballsToAdd = newNumBalls - numBalls;
+            for (let i = 0; i < ballsToAdd; i++) {
+                let radius = Math.random() * (maxRadius - minRadius) + minRadius;
+                let position = new Vector(Math.random() * width, Math.random() * (height - 200));
+                let velocity = new Vector(Math.random() * (maxXvel - minXvel) + minXvel, 0);
+                let color = [Math.random() * 255, Math.random() * 255, Math.random() * 255];
+                let mass = Math.PI * radius * radius;
+                let ball = new Ball(radius, position, velocity, mass, color)
+                balls.push(ball)
+            }
+            numBalls = newNumBalls;
+        }
+        else {
+            balls.pop();
+            numBalls = newNumBalls;
+        }
+    }
+
+    function handleCollisions(ball1, ball2) {
+
+        let direction = new Vector();
+        direction.subtractVectors(ball2.position, ball1.position);
+
+        let distance = direction.length();
+        if (distance > ball1.radius + ball2.radius) {
+            return;
+        }
+        direction.scale(1.0 / distance);
+
+        let correction = (ball1.radius + ball2.radius - distance) / 2.0;
+
+        ball1.position.add(direction, -correction);
+        ball2.position.add(direction, correction);
+
+        let v1 = ball1.velocity.dot(direction);
+        let v2 = ball2.velocity.dot(direction);
+
+        let m1 = ball1.mass;
+        let m2 = ball2.mass;
+
+        let newV1 = (m1 * v1 + m2 * v2 - m2 * (v1 - v2) * restitution) / (m1 + m2);
+        let newV2 = (m1 * v1 + m2 * v2 - m1 * (v2 - v1) * restitution) / (m1 + m2);
+
+        ball1.velocity.add(direction, newV1 - v1);
+        ball2.velocity.add(direction, newV2 - v2);
+    }
+
+    function checkBoundaries(ball) {
+        if (ball.position.y >= height - ball.radius) {
+            ball.position.y = height - ball.radius;
+            ball.velocity.y = -ball.velocity.y * restitution;
+        }
+        if (ball.position.y <= ball.radius) {
+            ball.position.y = ball.radius;
+            ball.velocity.y = -ball.velocity.y * restitution;
+        }
+        if (ball.position.x >= width - ball.radius) {
+            ball.position.x = width - ball.radius;
+            ball.velocity.x = -ball.velocity.x * restitution;
+        }
+        if (ball.position.x <= ball.radius) {
+            ball.position.x = ball.radius;
+            ball.velocity.x = -ball.velocity.x * restitution;
+        }
+    }
+
+    function getThetaDir(rDir) {
+        let theta = Math.atan2(rDir.y, rDir.x);
+        theta += Math.PI / 2;
+        return new Vector(Math.cos(theta), Math.sin(theta));
+    }
+
+    function satisfyConstraints(ball, prevPosition) {
+        let timeStep = 1 / steps;
+
+        let direction = new Vector();
+        direction.subtractVectors(ball.position, constraintCenter);
+        let distance = direction.length();
+        if (distance === 0.0 || distance > 1.5 * constraintRadius) {
+            return;
+        }
+
+        direction.scale(1.0 / distance);
+        ball.position.add(direction, constraintRadius - distance);
+        ball.velocity.subtractVectors(ball.position, prevPosition).scale(1.0 / timeStep);
+
+        let normalDir = new Vector();
+        normalDir.subtractVectors(ball.position, constraintCenter);
+        normalDir.scale(1.0 / normalDir.length());
+
+        let velocityDir = ball.velocity.clone();
+        velocityDir.scale(1.0 / velocityDir.length());
+        let normLength = Math.abs(normalDir.dot(gravity));
+        ball.velocity.subtract(velocityDir, (friction * normLength) / steps);
+    }
+
+    function updatePositions() {
+        let timeStep = 1.0 / steps;
+
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i]
+            for (let j = 0; j < steps; j++) {
+
+                if (ball !== draggedBall) {
+                    ball.velocity.add(gravity, timeStep);
+                }
+
+                let prevPosition = ball.position.clone()
+                ball.position.add(ball.velocity, timeStep);
+                checkBoundaries(ball)
+                if (ball !== draggedBall) {
+                    satisfyConstraints(ball, prevPosition)
+                }
+            }
+
+            for (let j = i + 1; j < numBalls; j++) {
+                handleCollisions(ball, balls[j]);
+            }
+        }
+    }
+
+    setup();
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.arc(constraintCenter.x, constraintCenter.y ,constraintRadius, 0, 2 * Math.PI);
+        ctx.stroke();
+        updatePositions();
+        for (let i = 0; i < numBalls; i++) {
+            ctx.fillStyle = `rgb(${balls[i].color[0]}, ${balls[i].color[1]}, ${balls[i].color[2]})`;
+            ctx.beginPath();
+            ctx.arc(balls[i].position.x, balls[i].position.y, balls[i].radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    setInterval(draw, 1000 / 60);
+
+</script>
+</html>

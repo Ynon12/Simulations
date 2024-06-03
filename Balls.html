@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 80vh;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 1px solid black;
+        }
+        #ballSlider {
+            width: 8%;
+        }
+        #restitutionSlider {
+            width: 8%;
+        }
+        #restitutionValue {
+            display: inline-block;
+            width: 200px;
+        }
+        #numBallValue {
+            display: inline-block;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container">
+    <canvas id="myCanvas"></canvas>
+</div>
+
+<span id="numBallValue">Number of Balls: 1</span>
+<input type="range" id="ballSlider" min="1" max="100" value="1"> <br>
+
+<span id="restitutionValue">Coefficient of Restitution: 1</span>
+<input type="range" id="restitutionSlider" min="0" max="1" value="1" step="0.05"> <br>
+
+<button id="toggleGravityButton">Toggle Gravity</button>
+<span id="gravityStatus">Gravity: OFF</span>
+
+</body>
+<script>
+
+    class Vector {
+        constructor(x = 0.0, y = 0.0) {
+            this.x = x;
+            this.y = y;
+        }
+
+        set(v) {
+            this.x = v.x;
+            this.y = v.y;
+        }
+
+        scale(s) {
+            this.x = this.x * s;
+            this.y = this.y * s;
+        }
+
+        add(v, s = 1.0) {
+            this.x += v.x * s;
+            this.y += v.y * s;
+            return this;
+        }
+
+        addVectors(a, b) {
+            this.x = a.x + b.x;
+            this.y = a.y + b.y;
+            return this;
+        }
+
+        subtract(v, s = 1.0) {
+            this.x -= v.x * s;
+            this.y -= v.y * s;
+            return this;
+        }
+
+        subtractVectors(a, b) {
+            this.x = a.x - b.x;
+            this.y = a.y - b.y;
+            return this;
+        }
+
+        clone() {
+            return new Vector(this.x, this.y);
+        }
+
+        length() {
+            return Math.sqrt(this.x * this.x + this.y * this.y);
+        }
+
+        dot(v) {
+            return this.x * v.x + this.y * v.y;
+        }
+    }
+    class Ball {
+        constructor(radius, position, velocity, mass, color) {
+            this.color = color;
+            this.mass = mass;
+            this.radius = radius;
+            this.position = position.clone();
+            this.velocity = velocity.clone();
+        }
+
+    }
+
+    let canvas, ctx;
+    let width, height;
+    let balls = [];
+    let numBalls;
+    let gravityOn;
+    let gravity;
+    let steps;
+    let restitution;
+    let minRadius;
+    let maxRadius;
+    let minXvel;
+    let maxXvel;
+
+    function setup() {
+        canvas = document.getElementById('myCanvas');
+        ctx = canvas.getContext('2d');
+
+        resizeCanvas();
+        steps = 10;
+        numBalls = 1;
+        gravityOn = false;
+        gravity = new Vector(0, 0.5);
+        restitution = 1;
+        minRadius = 10;
+        maxRadius = 15;
+        minXvel = -5;
+        maxXvel = 5;
+
+        for (let i = 0; i < numBalls; i++) {
+            let radius = Math.random() * (maxRadius - minRadius) + minRadius;
+            let position = new Vector(Math.random() * width, Math.random() * (height - 200));
+            let velocity = new Vector(Math.random() * (maxXvel - minXvel) + minXvel, 0);
+            let color = [Math.random() * 255, Math.random() * 255, Math.random() * 255];
+            let mass = Math.PI * radius * radius;
+            balls.push(new Ball(radius, position, velocity, mass, color))
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+    }
+
+    function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight * 0.8;
+        canvas.width = width;
+        canvas.height = height;
+    }
+
+    function toggleGravity() {
+        gravityOn = !gravityOn;
+        const gravityStatusElement = document.getElementById('gravityStatus');
+        gravityStatusElement.innerText = `Gravity: ${gravityOn ? 'ON' : 'OFF'}`;
+    }
+
+    document.getElementById('toggleGravityButton').addEventListener('click', toggleGravity);
+
+    let numBallSliderValue = document.getElementById('numBallValue');
+    document.getElementById('ballSlider').addEventListener('input', function() {
+        let newNumBalls = parseInt(this.value);
+        numBallSliderValue.textContent = "Number of Balls: " + newNumBalls;
+        updateBalls(newNumBalls);
+    });
+
+    let restitutionSliderValue = document.getElementById('restitutionValue');
+    document.getElementById('restitutionSlider').addEventListener('input', function() {
+        restitution = this.value;
+        restitutionSliderValue.textContent = "Coefficient of Restitution: " + restitution;
+    });
+
+    function updateBalls(newNumBalls) {
+        if (numBalls < newNumBalls) {
+            let ballsToAdd = newNumBalls - numBalls;
+            for (let i = 0; i < ballsToAdd; i++) {
+                let radius = Math.random() * (maxRadius - minRadius) + minRadius;
+                let position = new Vector(Math.random() * width, Math.random() * (height - 200));
+                let velocity = new Vector(Math.random() * (maxXvel - minXvel) + minXvel, 0);
+                let color = [Math.random() * 255, Math.random() * 255, Math.random() * 255];
+                let mass = Math.PI * radius * radius;
+                balls.push(new Ball(radius, position, velocity, mass, color))
+            }
+            numBalls = newNumBalls;
+        }
+        else {
+            balls.pop();
+            numBalls = newNumBalls;
+        }
+    }
+
+    function handleCollisions(ball1, ball2) {
+
+        let direction = new Vector();
+        direction.subtractVectors(ball2.position, ball1.position);
+
+        let distance = direction.length();
+        if (distance > ball1.radius + ball2.radius) {
+            return;
+        }
+        direction.scale(1.0 / distance);
+
+        let correction = (ball1.radius + ball2.radius - distance) / 2.0;
+
+        ball1.position.add(direction, -correction);
+        ball2.position.add(direction, correction);
+
+        let v1 = ball1.velocity.dot(direction);
+        let v2 = ball2.velocity.dot(direction);
+
+        let m1 = ball1.mass;
+        let m2 = ball2.mass;
+
+        let newV1 = (m1 * v1 + m2 * v2 - m2 * (v1 - v2) * restitution) / (m1 + m2);
+        let newV2 = (m1 * v1 + m2 * v2 - m1 * (v2 - v1) * restitution) / (m1 + m2);
+
+        ball1.velocity.add(direction, newV1 - v1);
+        ball2.velocity.add(direction, newV2 - v2);
+    }
+
+    function updatePositions() {
+        let timeStep = 1 / steps;
+
+        for (let i = 0; i < numBalls; i++) {
+            for (let j = 0; j < steps; j++) {
+
+                if (gravityOn) {
+                    balls[i].velocity.add(gravity, timeStep);
+                }
+                balls[i].position.add(balls[i].velocity, timeStep);
+
+                if (balls[i].position.y >= height - balls[i].radius) {
+                    balls[i].position.y = height - balls[i].radius;
+                    balls[i].velocity.y = -balls[i].velocity.y * restitution;
+                }
+                if (balls[i].position.y <= balls[i].radius) {
+                    balls[i].position.y = balls[i].radius;
+                    balls[i].velocity.y = -balls[i].velocity.y * restitution;
+                }
+                if (balls[i].position.x >= width - balls[i].radius) {
+                    balls[i].position.x = width - balls[i].radius;
+                    balls[i].velocity.x = -balls[i].velocity.x * restitution;
+                }
+                if (balls[i].position.x <= balls[i].radius) {
+                    balls[i].position.x = balls[i].radius;
+                    balls[i].velocity.x = -balls[i].velocity.x * restitution;
+                }
+            }
+            for (let j = i + 1; j < numBalls; j++) {
+                handleCollisions(balls[i], balls[j]);
+            }
+        }
+    }
+
+    setup();
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        updatePositions();
+        for (let i = 0; i < numBalls; i++) {
+            ctx.fillStyle = `rgb(${balls[i].color[0]}, ${balls[i].color[1]}, ${balls[i].color[2]})`;
+            ctx.beginPath();
+            ctx.arc(balls[i].position.x, balls[i].position.y, balls[i].radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    setInterval(draw, 1000 / 60);
+
+</script>
+</html>

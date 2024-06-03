@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Electric Field Simulation</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 80vh;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: 1px solid black;
+        }
+        #ballSlider {
+            width: 8%;
+        }
+        #numBallValue {
+            display: inline-block;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container">
+    <canvas id="myCanvas"></canvas>
+</div>
+
+<span id="numBallValue">Number of Charges: 1</span>
+<input type="range" id="ballSlider" min="1" max="4" value="1"> <br>
+
+</body>
+<script>
+
+    class Vector {
+        constructor(x = 0.0, y = 0.0) {
+            this.x = x;
+            this.y = y;
+        }
+
+        set(v) {
+            this.x = v.x;
+            this.y = v.y;
+        }
+
+        scale(s) {
+            this.x *= s;
+            this.y *= s;
+        }
+
+        add(v, s = 1.0) {
+            this.x += v.x * s;
+            this.y += v.y * s;
+            return this;
+        }
+
+        addVectors(a, b) {
+            this.x = a.x + b.x;
+            this.y = a.y + b.y;
+            return this;
+        }
+
+        subtract(v, s = 1.0) {
+            this.x -= v.x * s;
+            this.y -= v.y * s;
+            return this;
+        }
+
+        subtractVectors(a, b) {
+            this.x = a.x - b.x;
+            this.y = a.y - b.y;
+            return this;
+        }
+
+        clone() {
+            return new Vector(this.x, this.y);
+        }
+
+        length() {
+            return Math.sqrt(this.x * this.x + this.y * this.y);
+        }
+
+        dot(v) {
+            return this.x * v.x + this.y * v.y;
+        }
+    }
+
+    class Ball {
+        constructor(radius, position, mass, charge = 1) {
+            if (charge > 0) {
+                this.color = [255, 0, 0];
+            } else {
+                this.color = [0, 0, 255];
+            }
+            this.mass = mass;
+            this.charge = charge * 1.602 * (1e-3);
+            this.radius = radius;
+            this.position = position.clone();
+        }
+    }
+
+    let canvas, ctx;
+    let width, height;
+    let gridSize, cellSize;
+    let balls = [];
+    let coulombConstant;
+    let numBalls;
+    let steps;
+    let maxLength;
+    let isDragging = false;
+    let draggedBall = null;
+    let lastMouseX, lastMouseY;
+
+    function setup() {
+        canvas = document.getElementById('myCanvas');
+        ctx = canvas.getContext('2d');
+
+        resizeCanvas();
+        gridSize = 100;
+        cellSize = canvas.width / gridSize;
+        maxLength = 300;
+        coulombConstant = 8.99e9;
+        steps = 1000;
+        numBalls = 1;
+
+        for (let i = 0; i < numBalls; i++) {
+            let radius = 10;
+            let position = new Vector(width / 2, height / 2);
+            let charge = 1;
+            let mass = Math.PI * radius * radius;
+            let ball = new Ball(radius, position, mass, charge);
+            balls.push(ball);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', onMouseDown);
+        canvas.addEventListener('mousemove', onMouseMove);
+        canvas.addEventListener('mouseup', onMouseUp);
+        canvas.addEventListener('mouseleave', onMouseLeave);
+    }
+
+    function resizeCanvas() {
+        width = window.innerWidth;
+        height = window.innerHeight * 0.8;
+        canvas.width = width;
+        canvas.height = height;
+    }
+
+    let numBallSliderValue = document.getElementById('numBallValue');
+    document.getElementById('ballSlider').addEventListener('input', function() {
+        let newNumBalls = parseInt(this.value);
+        numBallSliderValue.textContent = "Number of Balls: " + newNumBalls;
+        updateBalls(newNumBalls);
+    });
+
+    function updateBalls(newNumBalls) {
+        if (numBalls < newNumBalls) {
+            let ballsToAdd = newNumBalls - numBalls;
+            for (let i = 0; i < ballsToAdd; i++) {
+                let radius = 10;
+                let position = new Vector(Math.random() * width, Math.random() * height);
+                let charge = newNumBalls % 2 === 0 ? -1 : 1;
+                let mass = Math.PI * radius * radius;
+                let ball = new Ball(radius, position, mass, charge);
+                balls.push(ball);
+            }
+            numBalls = newNumBalls;
+        } else {
+            balls.splice(newNumBalls, numBalls - newNumBalls);
+            numBalls = newNumBalls;
+        }
+    }
+
+    function updateGrid() {
+        for (let row = 0; row < gridSize; row++) {
+            for (let col = 0; col < gridSize; col++) {
+                let centerX = col * cellSize + cellSize / 2;
+                let centerY = row * cellSize + cellSize / 2;
+                let centerPos = new Vector(centerX, centerY);
+                let fieldAtCell = calculateField(centerPos);
+
+                const normalizedLength = Math.min(fieldAtCell.length() / maxLength, 1);
+                fieldAtCell.scale(1 / 10)
+                drawArrow(centerPos, fieldAtCell, arrowColor(normalizedLength));
+            }
+        }
+        // drawGridLines();
+    }
+
+    function arrowColor(length) {
+        const color1 = { r: 0, g: 0, b: 255 };
+        const color2 = { r: 255, g: 0, b: 255 };
+        const color3 = { r: 255, g: 0, b: 0 };
+
+        let r, g, b;
+
+        if (length <= 0.5) {
+            const t = length * 2;
+            r = Math.round((1 - t) * color1.r + t * color2.r);
+            g = Math.round((1 - t) * color1.g + t * color2.g);
+            b = Math.round((1 - t) * color1.b + t * color2.b);
+        } else {
+            const t = (length - 0.5) * 2;
+            r = Math.round((1 - t) * color2.r + t * color3.r);
+            g = Math.round((1 - t) * color2.g + t * color3.g);
+            b = Math.round((1 - t) * color2.b + t * color3.b);
+        }
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function drawArrow(center, vector, color) {
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+
+        let startX = center.x - vector.x / 2;
+        let startY = center.y - vector.y / 2;
+        let endX = center.x + vector.x / 2;
+        let endY = center.y + vector.y / 2;
+
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        let headLength = 100 * (vector.length() / maxLength);
+        let angle = Math.atan2(vector.y, vector.x);
+        let headAngle = Math.PI / 8;
+        let arrowX1 = endX - headLength * Math.cos(angle - headAngle);
+        let arrowY1 = endY - headLength * Math.sin(angle - headAngle);
+        let arrowX2 = endX - headLength * Math.cos(angle + headAngle);
+        let arrowY2 = endY - headLength * Math.sin(angle + headAngle);
+
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(arrowX1, arrowY1);
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(arrowX2, arrowY2);
+        ctx.stroke();
+    }
+
+    function drawGridLines() {
+        ctx.beginPath();
+        ctx.strokeStyle = 'lightgray';
+        for (let x = cellSize; x < canvas.width; x += cellSize) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+        }
+        for (let y = cellSize; y < canvas.height; y += cellSize) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+        }
+        ctx.stroke();
+    }
+
+    function calculateField(pos) {
+        let totalField = new Vector();
+
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            let direction = new Vector();
+            direction.subtractVectors(pos, ball.position);
+            let distanceSquared = direction.length() ** 2;
+
+            let safeRadius = ball.radius * 1;
+            if (distanceSquared < safeRadius ** 2 || distanceSquared === 0) {
+                continue;
+            }
+
+            let distance = Math.sqrt(distanceSquared);
+            let invDistance = 1.0 / distance;
+            let invDistanceSquared = invDistance * invDistance;
+            direction.scale(invDistance);
+
+            let fieldStrength = coulombConstant * ball.charge * invDistanceSquared;
+            totalField.add(direction, fieldStrength);
+        }
+
+        const totalFieldLength = totalField.length();
+
+        if (totalFieldLength > maxLength) {
+            totalField.scale(maxLength / totalFieldLength);
+        }
+
+        return totalField;
+    }
+
+    function onMouseMove(e) {
+        isHoveringOverBall = false;
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            let dx = ball.position.x - (e.clientX - canvas.offsetLeft);
+            let dy = ball.position.y - (e.clientY - canvas.offsetTop);
+            let distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < ball.radius) {
+                isHoveringOverBall = true;
+                canvas.style.cursor = 'grab';
+                break;
+            }
+        }
+
+        if (!isHoveringOverBall) {
+            canvas.style.cursor = 'default';
+        }
+
+        if (isDragging && draggedBall) {
+            draggedBall.position.x = e.clientX - canvas.offsetLeft;
+            draggedBall.position.y = e.clientY - canvas.offsetTop;
+        }
+    }
+
+    function onMouseDown(e) {
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            let dx = ball.position.x - (e.clientX - canvas.offsetLeft);
+            let dy = ball.position.y - (e.clientY - canvas.offsetTop);
+            let distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < ball.radius) {
+                isDragging = true;
+                draggedBall = ball;
+                draggedBall.isDragging = true;
+                canvas.style.cursor = 'grabbing';
+                break;
+            }
+        }
+    }
+
+    function onMouseUp(e) {
+        if (isDragging && draggedBall) {
+            isDragging = false;
+            draggedBall.isDragging = false;
+            draggedBall = null;
+            canvas.style.cursor = isHoveringOverBall ? 'grab' : 'default';
+        }
+    }
+
+    function onMouseLeave(e) {
+        if (isDragging && draggedBall) {
+            isDragging = false;
+            draggedBall.isDragging = false;
+            draggedBall = null;
+        }
+        canvas.style.cursor = 'default';
+    }
+
+    setup();
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        updateGrid();
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            ctx.fillStyle = `rgb(${ball.color[0]}, ${ball.color[1]}, ${ball.color[2]})`;
+            ctx.beginPath();
+            ctx.arc(ball.position.x, ball.position.y, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            if (ball.isDragging) {
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+        requestAnimationFrame(draw);
+    }
+
+    draw();
+
+</script>
+</html>

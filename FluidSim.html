@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Title</title>
+    </head>
+    <body>
+        <canvas id="simCanvas" width="400" height="400" style="border: 1px solid #000;"></canvas>
+    </body>
+    <script>
+        var canvas = document.getElementById("simCanvas");
+        var context = canvas.getContext("2d");
+        canvas.width = window.innerWidth - 20;
+        canvas.height = window.innerHeight - 100;
+        canvas.focus();
+
+        var simHeight = 1.1;
+        var cScale = canvas.height / simHeight;
+        var simWidth = canvas.width / cScale;
+
+        var U_FIELD = 0;
+        var V_FIELD = 1;
+        var S_FIELD = 2;
+
+        function cX(x) {
+            return x * cScale;
+        }
+        function cY(y) {
+            return canvas.height - y * cScale;
+        }
+
+        class Fluid {
+            constructor(density, numX, numY, h) {
+                this.density = density;
+                this.numX = numX + 2;
+                this.numY = numY +2;
+                this.numCells = this.numX * this.numY;
+                this.h = h;
+
+                this.u = new Float32Array(this.numCells);
+                this.v = new Float32Array(this.numCells);
+                this.newU = new Float32Array(this.numCells);
+                this.newV = new Float32Array(this.numCells);
+                this.pressure = new Float32Array(this.numCells);
+                this.scalar = new Float32Array(this.numCells);
+                this.m = new Float32Array(this.numCells);
+                this.newM = new Float32Array(this.numCells);
+                this.m.fill(1.0)
+                var num = numX * numY;
+            }
+
+            integrate(dt, gravity) {
+                var n = this.numY;
+                for (var i = 1; i < this.numX; i++) {
+                    for (var j = 1; j < this.numY; j++) {
+                        if (this.scalar[i*n + j] != 0 && this.scalar[i*n +j - 1] != 0) {
+                            this.v[i*n +j] += dt * gravity;
+                        }
+                    }
+                }
+            }
+
+            incompressibility(dt, numIterations) {
+
+                var n = this.numY;
+                var cp = this.density * this.h / dt;
+
+                for (var k = 0; n < numIterations; numIterations++) {
+                    for (var i = 1; i < this.numX - 1; i++) {
+                        for (var j = 1; j < this.numY - 1; j++) {
+
+                            if (this.scalar[i*n + j] == 0) {
+                                continue;
+                            }
+
+                            var sLeft = this.scalar[(i-1)*n + j];
+                            var sRight = this.scalar[(i+1)*n + j];
+                            var sUp = this.scalar[i*n + j - 1];
+                            var sDown = this.scalar[i*n + j + 1];
+                            var s = sLeft + sRight + sUp + sDown;
+
+                            var divergence = this.u((i+1)*n + j) - this.u(i*n + j) + this.v(i*n + j + 1) - this.v(i*n + j);
+                            var pressure = -divergence/s;
+
+                            pressure *= scene.overRelaxation;
+                            this.pressure[i*n + j] += pressure * cp;
+
+                            this.u[i*n + j] += pressure * sLeft;
+                            this.u[(i+1)*n + j] -= pressure * sRight;
+                            this.v[i*n + j] += pressure * sUp;
+                            this.v[i*n + j + 1] -= pressure * sDown;
+
+                        }
+                    }
+                }
+
+            }
+            advection() {
+                for (var i = 1; i < this.numX - 1; i++) {
+                    for (var j = 1; j < this.numY - 1; j++) {
+                        var vBar = (this.v[i*n + j] + this.v[i*n + j + 1] + this.v[(i-1)*n + j] + this.v[(i-1)*n + j + 1]) / 4;
+
+                        var w00 = 1 - i/h;
+                        var w01 = i/h;
+                        var w10 = 1 - j/h;
+                        var w11 = j/h;
+
+                        var vBarInterpolated = w00 * w10 *this.v[i*n + j] +
+                            w01 * w10 * this.v[(i+1)*n + j] +
+                            w10 * w11 * this.v[i*n + j + 1] +
+                            w11 * w11 * this.v[(i+1)*n + j + 1];
+                        
+
+                    }
+                }
+            }
+        }
+    </script>
+</html>
