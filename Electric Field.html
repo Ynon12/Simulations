@@ -21,12 +21,21 @@
             height: 100%;
             border: 1px solid black;
         }
-        #ballSlider {
-            width: 8%;
+        #controls {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+            margin-left: 10px;
         }
-        #numBallValue {
-            display: inline-block;
-            width: 200px;
+        #controls input {
+            margin-right: 10px;
+            width: 10%;
+        }
+        #controls button {
+            margin-right: 10px;
+        }
+        #instructions {
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -36,11 +45,22 @@
     <canvas id="myCanvas"></canvas>
 </div>
 
-<span id="numBallValue">Number of Charges: 1</span>
-<input type="range" id="ballSlider" min="1" max="4" value="1"> <br>
+<div id="controls">
+    <input type="number" id="chargeValue" placeholder="Charge Value (whole number)" step="0.1">
+    <button id="addChargeButton">Add Charge</button>
+    <button id="clearChargesButton">Clear Charges</button>
+</div>
+
+<div id="instructions">
+    Right-click on a charge to pin/unpin it.
+</div>
 
 </body>
 <script>
+
+    const coulombConstant = 8.99e9;
+    const electronCharge = 2 * 1.602e-4;
+    const restitution = 1;
 
     class Vector {
         constructor(x = 0.0, y = 0.0) {
@@ -97,15 +117,32 @@
 
     class Ball {
         constructor(radius, position, mass, charge = 1) {
-            if (charge > 0) {
-                this.color = [255, 0, 0];
-            } else {
-                this.color = [0, 0, 255];
-            }
             this.mass = mass;
-            this.charge = charge * 1.602 * (1e-3);
+            this.charge = charge * electronCharge;
             this.radius = radius;
             this.position = position.clone();
+            this.velocity = new Vector();
+            this.isPinned = true;
+            this.setColor();
+        }
+
+        setColor() {
+            const maxCharge = 4;
+            const chargeRatio = Math.abs(this.charge) / (maxCharge * electronCharge);
+
+            if (this.charge > 0) {
+                const red = 255;
+                const green = Math.round(255 * (1 - chargeRatio));
+                const blue = Math.round(255 * (1 - chargeRatio));
+                this.color = [red, green, blue];
+            } else if (this.charge < 0) {
+                const red = Math.round(255 * (1 - chargeRatio));
+                const green = Math.round(255 * (1 - chargeRatio));
+                const blue = 255;
+                this.color = [red, green, blue];
+            } else {
+                this.color = [255, 255, 255];
+            }
         }
     }
 
@@ -113,13 +150,13 @@
     let width, height;
     let gridSize, cellSize;
     let balls = [];
-    let coulombConstant;
     let numBalls;
     let steps;
     let maxLength;
     let isDragging = false;
     let draggedBall = null;
     let lastMouseX, lastMouseY;
+    let deletionZone = {};
 
     function setup() {
         canvas = document.getElementById('myCanvas');
@@ -129,14 +166,19 @@
         gridSize = 100;
         cellSize = canvas.width / gridSize;
         maxLength = 300;
-        coulombConstant = 8.99e9;
         steps = 1000;
-        numBalls = 1;
+        numBalls = 2;
+        deletionZone = {
+            x: width - 100,
+            y: 10,
+            width: 100,
+            height: 50
+        };
 
         for (let i = 0; i < numBalls; i++) {
             let radius = 10;
-            let position = new Vector(width / 2, height / 2);
-            let charge = 1;
+            let position = new Vector(width / 2 + (i - 1) * 150, height / 2);
+            let charge = i % 2 === 0 ? 1 : -1;
             let mass = Math.PI * radius * radius;
             let ball = new Ball(radius, position, mass, charge);
             balls.push(ball);
@@ -147,6 +189,9 @@
         canvas.addEventListener('mousemove', onMouseMove);
         canvas.addEventListener('mouseup', onMouseUp);
         canvas.addEventListener('mouseleave', onMouseLeave);
+        canvas.addEventListener('contextmenu', onRightClick);
+        document.getElementById('addChargeButton').addEventListener('click', addCharge);
+        document.getElementById('clearChargesButton').addEventListener('click', clearCharges);
     }
 
     function resizeCanvas() {
@@ -156,32 +201,107 @@
         canvas.height = height;
     }
 
-    let numBallSliderValue = document.getElementById('numBallValue');
-    document.getElementById('ballSlider').addEventListener('input', function() {
-        let newNumBalls = parseInt(this.value);
-        numBallSliderValue.textContent = "Number of Balls: " + newNumBalls;
-        updateBalls(newNumBalls);
-    });
-
-    function updateBalls(newNumBalls) {
-        if (numBalls < newNumBalls) {
-            let ballsToAdd = newNumBalls - numBalls;
-            for (let i = 0; i < ballsToAdd; i++) {
-                let radius = 10;
-                let position = new Vector(Math.random() * width, Math.random() * height);
-                let charge = newNumBalls % 2 === 0 ? -1 : 1;
-                let mass = Math.PI * radius * radius;
-                let ball = new Ball(radius, position, mass, charge);
-                balls.push(ball);
-            }
-            numBalls = newNumBalls;
-        } else {
-            balls.splice(newNumBalls, numBalls - newNumBalls);
-            numBalls = newNumBalls;
+    function addCharge() {
+        let chargeValue = parseFloat(document.getElementById('chargeValue').value);
+        if (Number.isInteger(chargeValue) && chargeValue !== 0) {
+            let radius = 10;
+            let position = new Vector(Math.random() * width, Math.random() * height);
+            let charge = chargeValue;
+            let mass = Math.PI * radius * radius;
+            let ball = new Ball(radius, position, mass, charge);
+            balls.push(ball);
+            numBalls++;
         }
     }
 
-    function updateGrid() {
+    function clearCharges() {
+        balls = [];
+        numBalls = 0;
+    }
+
+    function handleCollisions(ball1, ball2) {
+
+        let direction = new Vector();
+        direction.subtractVectors(ball2.position, ball1.position);
+
+        let distance = direction.length();
+        if (distance > ball1.radius + ball2.radius) {
+            return;
+        }
+        direction.scale(1.0 / distance);
+        let correction = (ball1.radius + ball2.radius - distance) / 2.0;
+
+        let pinnedBall, movingBall;
+        if (ball1.isPinned) {
+            pinnedBall = ball1;
+            movingBall = ball2;
+        } else if (ball2.isPinned) {
+            pinnedBall = ball2;
+            movingBall = ball1;
+        } else {
+            ball1.position.add(direction, -correction);
+            ball2.position.add(direction, correction);
+
+            let v1 = ball1.velocity.dot(direction);
+            let v2 = ball2.velocity.dot(direction);
+
+            let m1 = ball1.mass;
+            let m2 = ball2.mass;
+
+            let newV1 = (m1 * v1 + m2 * v2 - m2 * (v1 - v2) * restitution) / (m1 + m2);
+            let newV2 = (m1 * v1 + m2 * v2 - m1 * (v2 - v1) * restitution) / (m1 + m2);
+
+            ball1.velocity.add(direction, newV1 - v1);
+            ball2.velocity.add(direction, newV2 - v2);
+            return;
+        }
+
+        let v = movingBall.velocity.dot(direction);
+        pinnedBall.velocity.set(0, 0);
+
+        let newV = -v * (1 + restitution);
+        movingBall.velocity.add(direction, newV);
+    }
+
+    function updatePositions() {
+        updateFieldLines();
+        let timeStep = 1 / steps;
+
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            if (ball === draggedBall || ball.isPinned) {
+                continue;
+            }
+            for (let j = 0; j < steps; j++) {
+
+                let force = calculateField(ball.position);
+                ball.velocity.add(force, ball.charge / ball.mass);
+                ball.position.add(ball.velocity, timeStep);
+
+                if (ball.position.y >= height - ball.radius) {
+                    ball.position.y = height - ball.radius;
+                    ball.velocity.y = -ball.velocity.y * restitution;
+                }
+                if (ball.position.y <= ball.radius) {
+                    ball.position.y = ball.radius;
+                    ball.velocity.y = -ball.velocity.y * restitution;
+                }
+                if (ball.position.x >= width - ball.radius) {
+                    ball.position.x = width - ball.radius;
+                    ball.velocity.x = -ball.velocity.x * restitution;
+                }
+                if (ball.position.x <= ball.radius) {
+                    ball.position.x = ball.radius;
+                    ball.velocity.x = -ball.velocity.x * restitution;
+                }
+            }
+            for (let j = i + 1; j < numBalls; j++) {
+                handleCollisions(balls[i], balls[j]);
+            }
+        }
+    }
+
+    function updateFieldLines() {
         for (let row = 0; row < gridSize; row++) {
             for (let col = 0; col < gridSize; col++) {
                 let centerX = col * cellSize + cellSize / 2;
@@ -198,8 +318,8 @@
     }
 
     function arrowColor(length) {
-        const color1 = { r: 0, g: 0, b: 255 };
-        const color2 = { r: 255, g: 0, b: 255 };
+        const color1 = { r: 255, g: 255, b: 255 };
+        const color2 = { r: 0, g: 0, b: 255 };
         const color3 = { r: 255, g: 0, b: 0 };
 
         let r, g, b;
@@ -315,6 +435,9 @@
         if (isDragging && draggedBall) {
             draggedBall.position.x = e.clientX - canvas.offsetLeft;
             draggedBall.position.y = e.clientY - canvas.offsetTop;
+            if (isInsideDeletionZone(draggedBall)) {
+                deleteBall(draggedBall);
+            }
         }
     }
 
@@ -333,6 +456,7 @@
                 draggedBall = ball;
                 draggedBall.isDragging = true;
                 canvas.style.cursor = 'grabbing';
+                draggedBall.velocity.scale(0);
                 break;
             }
         }
@@ -356,21 +480,76 @@
         canvas.style.cursor = 'default';
     }
 
+    function onRightClick(e) {
+        e.preventDefault();
+
+        for (let i = 0; i < numBalls; i++) {
+            let ball = balls[i];
+            let dx = ball.position.x - (e.clientX - canvas.offsetLeft);
+            let dy = ball.position.y - (e.clientY - canvas.offsetTop);
+            let distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < ball.radius) {
+                ball.isPinned = !ball.isPinned;
+                if (ball.isPinned) {
+                    ball.velocity.scale(0);
+                }
+                break;
+            }
+        }
+    }
+
+    function isInsideDeletionZone(ball) {
+        let ballCenterX = ball.position.x;
+        let ballCenterY = ball.position.y;
+        return (ballCenterX + ball.radius >= deletionZone.x &&
+            ballCenterX - ball.radius <= deletionZone.x + deletionZone.width &&
+            ballCenterY + ball.radius >= deletionZone.y &&
+            ballCenterY - ball.radius <= deletionZone.y + deletionZone.height);
+    }
+
+    function deleteBall(ball) {
+        const ballIndex = balls.indexOf(ball);
+        if (ballIndex !== -1) {
+            balls.splice(ballIndex, 1);
+            numBalls--;
+        }
+        isDragging = false;
+        draggedBall = null;
+        canvas.style.cursor = isHoveringOverBall ? 'grab' : 'default';
+    }
+
     setup();
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        updateGrid();
+        updatePositions();
         for (let i = 0; i < numBalls; i++) {
             let ball = balls[i];
             ctx.fillStyle = `rgb(${ball.color[0]}, ${ball.color[1]}, ${ball.color[2]})`;
             ctx.beginPath();
             ctx.arc(ball.position.x, ball.position.y, ball.radius, 0, Math.PI * 2);
             ctx.fill();
-            if (ball.isDragging) {
+            if (ball.isDragging || ball.isPinned) {
                 ctx.strokeStyle = 'black';
                 ctx.lineWidth = 1;
                 ctx.stroke();
             }
+        }
+
+        if (isDragging) {
+            let margin = 10;
+            ctx.fillStyle = `rgba(255, 0, 0, 0.5)`;
+            ctx.fillRect(deletionZone.x + margin, deletionZone.y,
+                deletionZone.width - 2 * margin, deletionZone.height);
+
+            ctx.fillStyle = 'black';
+            ctx.font = 'bold 16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const textX = deletionZone.x + deletionZone.width / 2;
+            const textY = deletionZone.y + deletionZone.height / 2;
+            ctx.fillText('remove', textX, textY);
+
         }
         requestAnimationFrame(draw);
     }
