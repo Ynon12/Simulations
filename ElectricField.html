@@ -59,7 +59,7 @@
 <script>
 
     const coulombConstant = 8.99e9;
-    const electronCharge = 2 * 1.602e-4;
+    const electronCharge = 1.602e-4;
     const restitution = 1;
 
     class Vector {
@@ -166,7 +166,7 @@
         gridSize = 100;
         cellSize = canvas.width / gridSize;
         maxLength = 300;
-        steps = 1000;
+        steps = 100;
         numBalls = 2;
         deletionZone = {
             x: width - 100,
@@ -220,7 +220,6 @@
     }
 
     function handleCollisions(ball1, ball2) {
-
         let direction = new Vector();
         direction.subtractVectors(ball2.position, ball1.position);
 
@@ -256,6 +255,10 @@
             return;
         }
 
+        if (movingBall.isPinned) {
+            return;
+        }
+
         let v = movingBall.velocity.dot(direction);
         pinnedBall.velocity.set(0, 0);
 
@@ -265,38 +268,40 @@
 
     function updatePositions() {
         updateFieldLines();
-        let timeStep = 1 / steps;
+        let timeStep = 1.0 / steps;
 
         for (let i = 0; i < numBalls; i++) {
             let ball = balls[i];
-            if (ball === draggedBall || ball.isPinned) {
+            if (ball === draggedBall) {
                 continue;
             }
-            for (let j = 0; j < steps; j++) {
+            if (!ball.isPinned) {
+                for (let j = 0; j < steps; j++) {
+                    let field = calculateField(ball.position);
+                    ball.velocity.add(field, 1000 * (ball.charge / ball.mass) * timeStep);
+                    ball.position.add(ball.velocity, timeStep);
+                    console.log(ball.position)
 
-                let force = calculateField(ball.position);
-                ball.velocity.add(force, ball.charge / ball.mass);
-                ball.position.add(ball.velocity, timeStep);
-
-                if (ball.position.y >= height - ball.radius) {
-                    ball.position.y = height - ball.radius;
-                    ball.velocity.y = -ball.velocity.y * restitution;
-                }
-                if (ball.position.y <= ball.radius) {
-                    ball.position.y = ball.radius;
-                    ball.velocity.y = -ball.velocity.y * restitution;
-                }
-                if (ball.position.x >= width - ball.radius) {
-                    ball.position.x = width - ball.radius;
-                    ball.velocity.x = -ball.velocity.x * restitution;
-                }
-                if (ball.position.x <= ball.radius) {
-                    ball.position.x = ball.radius;
-                    ball.velocity.x = -ball.velocity.x * restitution;
+                    if (ball.position.y >= height - ball.radius) {
+                        ball.position.y = height - ball.radius;
+                        ball.velocity.y = -ball.velocity.y * restitution;
+                    }
+                    if (ball.position.y <= ball.radius) {
+                        ball.position.y = ball.radius;
+                        ball.velocity.y = -ball.velocity.y * restitution;
+                    }
+                    if (ball.position.x >= width - ball.radius) {
+                        ball.position.x = width - ball.radius;
+                        ball.velocity.x = -ball.velocity.x * restitution;
+                    }
+                    if (ball.position.x <= ball.radius) {
+                        ball.position.x = ball.radius;
+                        ball.velocity.x = -ball.velocity.x * restitution;
+                    }
                 }
             }
             for (let j = i + 1; j < numBalls; j++) {
-                handleCollisions(balls[i], balls[j]);
+                handleCollisions(ball, balls[j]);
             }
         }
     }
@@ -404,6 +409,10 @@
             totalField.add(direction, fieldStrength);
         }
 
+        if (totalField.length() === 0) {
+            return totalField;
+        }
+
         const totalFieldLength = totalField.length();
 
         if (totalFieldLength > maxLength) {
@@ -493,6 +502,9 @@
                 ball.isPinned = !ball.isPinned;
                 if (ball.isPinned) {
                     ball.velocity.scale(0);
+                } else {
+                    // Reset the velocity to zero when unpinning
+                    ball.velocity = new Vector();
                 }
                 break;
             }
@@ -551,10 +563,9 @@
             ctx.fillText('remove', textX, textY);
 
         }
-        requestAnimationFrame(draw);
     }
 
-    draw();
+    setInterval(draw, 1000 / 60);
 
 </script>
 </html>
